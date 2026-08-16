@@ -1,0 +1,19 @@
+# Binary
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output coverage
+*.out
+
+# Dependency
+go.sum
+
+# OS files
+.DS_Store
+Thumbs.db
