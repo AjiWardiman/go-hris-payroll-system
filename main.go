@@ -21,10 +21,10 @@ import (
 // GANTI nilai-nilai di bawah ini sesuai setting PostgreSQL kamu.
 const (
 	dbHost     = "localhost"
-	dbPort     = 5432
+	dbPort     = 5433
 	dbUser     = "postgres"
-	dbPassword = "postgres" // ganti sesuai password PostgreSQL kamu
-	dbName     = "hris_db"  // pastikan database ini sudah dibuat duluan
+	dbPassword = "admin"   // ganti sesuai password PostgreSQL kamu
+	dbName     = "hris_db" // pastikan database ini sudah dibuat duluan
 )
 
 // ============================================================
@@ -146,7 +146,7 @@ func formatRupiah(angka float64) string {
 		totalSen = -totalSen
 	}
 
-	bulat := totalSen / 100  // bagian rupiah
+	bulat := totalSen / 100   // bagian rupiah
 	desimal := totalSen % 100 // bagian sen (0-99)
 
 	// Ubah bagian bulat ke string, lalu sisipkan titik tiap 3 digit
@@ -302,6 +302,31 @@ func bacaInt(label string) int {
 		nilai, err := strconv.Atoi(teks)
 		if err != nil {
 			fmt.Println("Input tidak valid, masukkan angka bulat (contoh: 40)")
+			continue
+		}
+		return nilai
+	}
+}
+
+// Sama seperti bacaFloat, TAPI langsung menolak nilai negatif saat itu juga
+// (tidak menunggu sampai semua field selesai diisi baru dicek).
+func bacaFloatNonNegatif(label string) float64 {
+	for {
+		nilai := bacaFloat(label)
+		if nilai < 0 {
+			fmt.Println("Nilai tidak boleh negatif, coba lagi.")
+			continue
+		}
+		return nilai
+	}
+}
+
+// Sama seperti bacaInt, TAPI langsung menolak nilai negatif saat itu juga.
+func bacaIntNonNegatif(label string) int {
+	for {
+		nilai := bacaInt(label)
+		if nilai < 0 {
+			fmt.Println("Nilai tidak boleh negatif, coba lagi.")
 			continue
 		}
 		return nilai
@@ -540,9 +565,34 @@ func main() {
 // daftarkanKaryawanDariInput menanyakan data karyawan ke user lewat
 // terminal, lalu memanggil RegisterEmployee sesuai tipe yang dipilih.
 // Kalau koneksi database tersedia, data juga otomatis disimpan ke DB.
+//
+// PENTING: validasi (ID duplikat, nama kosong, nilai negatif) dicek
+// LANGSUNG setelah tiap input diketik -- bukan menunggu semua field
+// selesai diisi baru dicek di akhir. Jadi kalau user salah ketik ID
+// yang sudah ada, dia langsung tahu saat itu juga, tidak perlu
+// mengisi semua field payroll dulu.
 func daftarkanKaryawanDariInput(hris *HRIS, db *sql.DB) {
-	id := bacaTeks("Masukkan ID Karyawan: ")
-	nama := bacaTeks("Masukkan Nama Karyawan: ")
+	// --- ID Karyawan: ulangi terus sampai ID-nya belum terdaftar ---
+	var id string
+	for {
+		id = bacaTeks("Masukkan ID Karyawan: ")
+		if _, sudahAda := hris.Employees[id]; sudahAda {
+			fmt.Println("ID tersebut sudah terdaftar, coba ID lain.")
+			continue
+		}
+		break
+	}
+
+	// --- Nama Karyawan: ulangi terus sampai tidak kosong ---
+	var nama string
+	for {
+		nama = bacaTeks("Masukkan Nama Karyawan: ")
+		if nama == "" {
+			fmt.Println("Nama tidak boleh kosong, coba lagi.")
+			continue
+		}
+		break
+	}
 
 	fmt.Println("Pilih Tipe Karyawan:")
 	fmt.Println("1. FullTime")
@@ -552,11 +602,14 @@ func daftarkanKaryawanDariInput(hris *HRIS, db *sql.DB) {
 
 	var payroll PayrollCalculator
 
+	// Field keuangan pakai bacaFloatNonNegatif / bacaIntNonNegatif,
+	// supaya kalau user ketik angka negatif, langsung ditolak saat itu
+	// juga (diminta mengulang), tidak perlu menunggu sampai akhir.
 	switch tipe {
 	case "1":
-		baseSalary := bacaFloat("Gaji Pokok (BaseSalary): ")
-		allowance := bacaFloat("Tunjangan (Allowance): ")
-		taxRate := bacaFloat("Tax Rate (contoh 0.05 untuk 5%): ")
+		baseSalary := bacaFloatNonNegatif("Gaji Pokok (BaseSalary): ")
+		allowance := bacaFloatNonNegatif("Tunjangan (Allowance): ")
+		taxRate := bacaFloatNonNegatif("Tax Rate (contoh 0.05 untuk 5%): ")
 		payroll = FullTimeEmployee{
 			BaseSalary: baseSalary,
 			Allowance:  allowance,
@@ -564,16 +617,16 @@ func daftarkanKaryawanDariInput(hris *HRIS, db *sql.DB) {
 		}
 
 	case "2":
-		monthlyRate := bacaFloat("Rate Bulanan (MonthlyRate): ")
-		bonus := bacaFloat("Bonus Kinerja (PerformanceBonus): ")
+		monthlyRate := bacaFloatNonNegatif("Rate Bulanan (MonthlyRate): ")
+		bonus := bacaFloatNonNegatif("Bonus Kinerja (PerformanceBonus): ")
 		payroll = ContractEmployee{
 			MonthlyRate:      monthlyRate,
 			PerformanceBonus: bonus,
 		}
 
 	case "3":
-		hourlyRate := bacaFloat("Upah per Jam (HourlyRate): ")
-		hoursWorked := bacaInt("Jumlah Jam Kerja (HoursWorked): ")
+		hourlyRate := bacaFloatNonNegatif("Upah per Jam (HourlyRate): ")
+		hoursWorked := bacaIntNonNegatif("Jumlah Jam Kerja (HoursWorked): ")
 		payroll = Freelancer{
 			HourlyRate:  hourlyRate,
 			HoursWorked: hoursWorked,
@@ -584,6 +637,9 @@ func daftarkanKaryawanDariInput(hris *HRIS, db *sql.DB) {
 		return
 	}
 
+	// RegisterEmployee tetap dipanggil sebagai lapisan validasi terakhir
+	// (sesuai instruksi soal), tapi karena ID/nama/nilai negatif sudah
+	// dicek di atas, seharusnya di titik ini selalu lolos dengan mulus.
 	err := hris.RegisterEmployee(id, nama, payroll)
 	if err != nil {
 		fmt.Println("Gagal mendaftarkan karyawan:", err)
